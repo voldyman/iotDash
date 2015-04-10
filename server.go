@@ -28,6 +28,12 @@ func main() {
 func connectMQTT(name string) *mqtt.Client {
 	opts := mqtt.NewClientOptions().AddBroker(SERVER).SetClientID(name).SetCleanSession(true)
 
+	opts.OnConnect = func(c *mqtt.Client) {
+		if token := c.Subscribe(SUBTOPIC, 2, messageReceived); token.Wait() && token.Error() != nil {
+			panic(token.Error())
+		}
+	}
+
 	client := mqtt.NewClient(opts)
 
 	if token := client.Connect(); token.Wait() && token.Error() != nil {
@@ -35,6 +41,10 @@ func connectMQTT(name string) *mqtt.Client {
 	}
 
 	return client
+}
+
+func messageReceived(client *mqtt.Client, msg mqtt.Message) {
+	fmt.Printf("Message received at: %s\nMessage:%s", msg.Topic(), msg.Payload())
 }
 
 // HTTP Server Code Below
