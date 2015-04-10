@@ -1,1 +1,1 @@
-web: iotDash
+web: bin/iotDash
