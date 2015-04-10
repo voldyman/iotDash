@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"os"
 	"text/template"
 
 	mqtt "git.eclipse.org/gitroot/paho/org.eclipse.paho.mqtt.golang.git"
@@ -28,12 +29,6 @@ func main() {
 func connectMQTT(name string) *mqtt.Client {
 	opts := mqtt.NewClientOptions().AddBroker(SERVER).SetClientID(name).SetCleanSession(true)
 
-	opts.OnConnect = func(c *mqtt.Client) {
-		if token := c.Subscribe(SUBTOPIC, 2, messageReceived); token.Wait() && token.Error() != nil {
-			panic(token.Error())
-		}
-	}
-
 	client := mqtt.NewClient(opts)
 
 	if token := client.Connect(); token.Wait() && token.Error() != nil {
@@ -43,16 +38,20 @@ func connectMQTT(name string) *mqtt.Client {
 	return client
 }
 
-func messageReceived(client *mqtt.Client, msg mqtt.Message) {
-	fmt.Printf("Message received at: %s\nMessage:%s", msg.Topic(), msg.Payload())
-}
-
 // HTTP Server Code Below
 func serveWeb(name string, client *mqtt.Client) {
 	router := mux.NewRouter()
 	router.HandleFunc("/", webHome)
 	router.HandleFunc("/action/{state}", webAction(name, client))
-	http.ListenAndServe(":8081", router)
+
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	fmt.Println("Listenting on port ", port)
+
+	http.ListenAndServe(":"+port, router)
 }
 
 func webHome(w http.ResponseWriter, r *http.Request) {
