@@ -99,7 +99,7 @@ var basicPage = `
 <head><title>{{ .Title }}</title></head>
 <body>
 <h1>NetPlug Cloud Dashboard</h1>
-<p>Number of clients: {{ .Clients }}</p>
+<p>Press the buttons to send command to your iot Device</p>
 <p><button id='on'>On</button></p>
 <p><button id='off'>Off</button></p>
 <script>
