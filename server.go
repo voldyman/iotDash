@@ -5,21 +5,53 @@ import (
 	"net/http"
 	"text/template"
 
+	mqtt "git.eclipse.org/gitroot/paho/org.eclipse.paho.mqtt.golang.git"
 	"github.com/gorilla/mux"
 )
 
+const (
+	SERVER   = "tcp://iot.eclipse.org:1883" // thanks eclicpse!
+	SUBTOPIC = "/netCloudDash/control/+"
+	PUBTOPIC = "/netCloudDash/control/%s"
+)
+
 func main() {
+	name := "Overlord"
 	// connect to mqtt
+	client := connectMQTT(name)
+
 	// create server
-	serveWeb()
+	serveWeb(name, client)
 	// enable comm
 }
 
+func connectMQTT(name string) *mqtt.Client {
+	opts := mqtt.NewClientOptions().AddBroker(SERVER).SetClientID(name).SetCleanSession(true)
+
+	opts.OnConnect = func(c *mqtt.Client) {
+		if token := c.Subscribe(SUBTOPIC, 2, messageReceived); token.Wait() && token.Error() != nil {
+			panic(token.Error())
+		}
+	}
+
+	client := mqtt.NewClient(opts)
+
+	if token := client.Connect(); token.Wait() && token.Error() != nil {
+		panic(token.Error())
+	}
+
+	return client
+}
+
+func messageReceived(client *mqtt.Client, msg mqtt.Message) {
+	fmt.Printf("Message received at: %s\nMessage:%s", msg.Topic(), msg.Payload())
+}
+
 // HTTP Server Code Below
-func serveWeb() {
+func serveWeb(name string, client *mqtt.Client) {
 	router := mux.NewRouter()
 	router.HandleFunc("/", webHome)
-	router.HandleFunc("/action/{state}", webAction)
+	router.HandleFunc("/action/{state}", webAction(name, client))
 	http.ListenAndServe(":8081", router)
 }
 
@@ -38,12 +70,29 @@ func webHome(w http.ResponseWriter, r *http.Request) {
 	t.ExecuteTemplate(w, "dash", data)
 }
 
-func webAction(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	fmt.Println("Got Action Request")
-	fmt.Println("state: ", vars["state"])
+func webAction(name string, client *mqtt.Client) func(w http.ResponseWriter, r *http.Request) {
+	pubTopic := fmt.Sprintf(PUBTOPIC, name)
 
-	w.Write([]byte("ok"))
+	return func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+
+		val := vars["state"]
+		send := "off"
+
+		fmt.Println("Got Action Request")
+		fmt.Println("state: ", val)
+
+		if val == "on" {
+			send = "on"
+		}
+		go func() {
+			if token := client.Publish(pubTopic, 1, false, send); token.Wait() && token.Error() != nil {
+				fmt.Println("Error occured during publish")
+			}
+			fmt.Println("Sent Action")
+		}()
+		w.Write([]byte("ok"))
+	}
 }
 
 var basicPage = `
@@ -64,7 +113,6 @@ function get(url) {
     r.open("GET", url, true);
     r.onreadystatechange = function () {
       if (r.readyState != 4 || r.status != 200) return;
-      alert("Success: " + r.responseText);
     };
     r.send();
 }
