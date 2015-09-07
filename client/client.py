@@ -1,7 +1,11 @@
 import paho.mqtt.client as mqtt
+import time
 
 # topic to subscribe to 
 SUBTOPIC = "/netCloudDash/control/+"
+
+# led state topic
+STATETOPIC = "/netCloudDash/control/led-state"
 
 def on_connect(client, userdata, flags, rc):
     print("Connected to server")
@@ -19,7 +23,16 @@ def main():
 
     client.connect("iot.eclipse.org", 1883, 60)
 
-    client.loop_forever()
+    client.loop_start()
+
+    while True:
+        client.publish(STATETOPIC, "on")
+        print "on sent"
+        time.sleep(3)
+
+        client.publish(STATETOPIC, "off")
+        print "off sent"
+        time.sleep(2)
 
 
 if __name__ == '__main__':

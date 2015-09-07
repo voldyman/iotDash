@@ -2,22 +2,36 @@ package main
 
 import (
 	"fmt"
+	"html/template"
 	"net/http"
 	"os"
-	"text/template"
 
 	mqtt "git.eclipse.org/gitroot/paho/org.eclipse.paho.mqtt.golang.git"
 	"github.com/gorilla/mux"
+	eventsource "gopkg.in/antage/eventsource.v1"
 )
 
 const (
-	SERVER   = "tcp://iot.eclipse.org:1883" // thanks eclicpse!
-	SUBTOPIC = "/netCloudDash/control/+"
-	PUBTOPIC = "/netCloudDash/control/%s"
+	SERVER     = "tcp://iot.eclipse.org:1883" // thanks eclicpse!
+	SUBTOPIC   = "/netCloudDash/control/+"
+	STATETOPIC = "/netCloudDash/control/led-state"
+	PUBTOPIC   = "/netCloudDash/control/%s"
+)
+
+var (
+	tpls *template.Template
 )
 
 func main() {
 	name := "Overlord"
+
+	// sketup templates
+	var err error
+	tpls, err = template.ParseGlob("./tmpl/*.tpl")
+	if err != nil {
+		panic("Unable to parse templates")
+	}
+
 	// connect to mqtt
 	client := connectMQTT(name)
 
@@ -40,9 +54,17 @@ func connectMQTT(name string) *mqtt.Client {
 
 // HTTP Server Code Below
 func serveWeb(name string, client *mqtt.Client) {
+	es := eventsource.New(nil, nil)
+	defer es.Close()
+
 	router := mux.NewRouter()
 	router.HandleFunc("/", webHome)
+	//	router.HandleFunc("/events", webEvents(es))
 	router.HandleFunc("/action/{state}", webAction(name, client))
+	router.Handle("/events", es)
+	router.HandleFunc("/public/{path}", func(w http.ResponseWriter, r *http.Request) {
+		http.StripPrefix("/public", http.FileServer(http.Dir("./public"))).ServeHTTP(w, r)
+	})
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -51,22 +73,31 @@ func serveWeb(name string, client *mqtt.Client) {
 
 	fmt.Println("Listenting on port ", port)
 
+	startEvents(es, client)
 	http.ListenAndServe(":"+port, router)
 }
 
-func webHome(w http.ResponseWriter, r *http.Request) {
-	t, err := template.New("dash").Parse(basicPage)
-	if err != nil {
-		w.Write([]byte(err.Error()))
+func webEvents(es eventsource.EventSource) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		fmt.Println("Request")
+		es.ServeHTTP(w, r)
 	}
+}
+func startEvents(es eventsource.EventSource, client *mqtt.Client) {
+	client.Subscribe(STATETOPIC, 0, func(c *mqtt.Client, m mqtt.Message) {
+		fmt.Println("Got message", string(m.Payload()))
+		es.SendEventMessage(string(m.Payload()), "led-state", "")
+	})
+}
 
+func webHome(w http.ResponseWriter, r *http.Request) {
 	var data struct {
 		Title   string
 		Clients int
 	}
 	data.Title = "Dashboard"
 	data.Clients = 1
-	t.ExecuteTemplate(w, "dash", data)
+	tpls.ExecuteTemplate(w, "dash.tpl", data)
 }
 
 func webAction(name string, client *mqtt.Client) func(w http.ResponseWriter, r *http.Request) {
@@ -93,38 +124,3 @@ func webAction(name string, client *mqtt.Client) func(w http.ResponseWriter, r *
 		w.Write([]byte("ok"))
 	}
 }
-
-var basicPage = `
-<html>
-<head><title>{{ .Title }}</title></head>
-<body>
-<h1>NetPlug Cloud Dashboard</h1>
-<p>Press the buttons to send command to your iot Device</p>
-<p><button id='on'>On</button></p>
-<p><button id='off'>Off</button></p>
-<script>
-// get DOM element
-function $(elName) { return document.getElementById(elName); }
-
-// get request
-function get(url) {
-    var r = new XMLHttpRequest();
-    r.open("GET", url, true);
-    r.onreadystatechange = function () {
-      if (r.readyState != 4 || r.status != 200) return;
-    };
-    r.send();
-}
-
-$('on').onclick = function() {
-    get('/action/on');
-};
-
-$('off').onclick = function() {
-    get('/action/off');
-};
-
-</script>
-</body>
-
-`
